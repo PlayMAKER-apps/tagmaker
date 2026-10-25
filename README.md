@@ -62,7 +62,9 @@ General shortcuts: `Space` toggles playback, `←` and `→` jump five seconds, 
 
 ### 6. Synchronize the match clock and score
 
-Video time includes introductions, breaks, and stoppages. It is **independent of the official match clock**. Select a period, choose **Sync clock**, and enter the visible `MM:SS.mmm` value. Use **Clock start/stop** when the official clock starts or stops. Without a manual sync, an event still has video time, but `game_clock_ms` is null.
+Video time includes introductions, breaks, and stoppages. It is **independent of the official match clock**. Select a period, pause at a frame with a readable scoreboard, choose **Sync clock**, and enter the visible `MM:SS.mmm` value. At the start of a basketball quarter, for example, select `Q1`, sync the displayed starting time (such as `10:00.000`, if that is the competition's rule), then use **Clock start/stop** at the frame where the official clock begins. Use the same button when the official clock stops and resumes. The game's clock runs from *video position*, so pausing the video also freezes the displayed clock; seeking past stoppages can make it inaccurate. Sync again whenever the scoreboard shows a reliable time, especially after seeking. Without a manual sync, an event still has video time, but `game_clock_ms` is null.
+
+At a period boundary, click **Clock start/stop** if the clock is running, then **Period end** to record a marker. Select the next period, sync its displayed starting value, record **Period start**, and click **Clock start/stop** when play begins if it is stopped. **Period start/end** and the event-grid **Game start/stop** buttons are markers; they do not change the clock's running state. Tag chronologically when possible: the project stores the current clock anchor, while each saved event keeps its captured game time.
 
 Choose a scoring event, then assign it to one of our players or the opposing squad. The on-screen score initially sums observed scoring tags. If tagging starts in the middle of a match or events are missing, use **Score snapshot / correction** to record known team totals. A partial tag log must not be treated as a verified final result.
 
@@ -87,7 +89,7 @@ JSON details are in [format 0.1](docs/format-0.1.md). The shared schema, validat
 - **`.MTS` is not shown:** update to this revision; the file picker now lists `.mts` and `.m2ts` in either case. **All files** also opens a file when libmpv recognizes its contents. A local 1080p `.MTS` was opened, sought, and played in the native backend.
 - **libmpv is not found:** check that Python and the DLL are both 64-bit and that the DLL directory is in the launching terminal's `PATH`.
 - **`$env:PATH` gives a syntax error:** the terminal is `cmd.exe`; use the `set "PATH=...;%PATH%"` form above.
-- **A player is missing:** choose the correct team and check **Convocati**.
+- **A player is missing:** check **Our squad** and **Convocati**; only called-up players of our squad appear in the actor buttons.
 - **Match clock is blank:** synchronize it; video time alone cannot establish official match time.
 - **A clip is missing:** use **Relink missing** with the original recording.
 

@@ -1,0 +1,26 @@
+{
+  "id": "basketball", "sport": "basketball", "label": "Basketball",
+  "clock_direction": "down", "periods": ["Q1", "Q2", "Q3", "Q4", "OT"],
+  "events": [
+    {"type": "period_start", "label": "Period start", "level": "BASIC", "key": "P"},
+    {"type": "period_end", "label": "Period end", "level": "BASIC", "key": "O"},
+    {"type": "game_start", "label": "Game start", "level": "BASIC"},
+    {"type": "game_stop", "label": "Game stop", "level": "BASIC"},
+    {"type": "score_1", "label": "Free throw +1", "level": "BASIC", "key": "1", "points": 1},
+    {"type": "score_2", "label": "Field goal +2", "level": "BASIC", "key": "2", "points": 2},
+    {"type": "score_3", "label": "Three pointer +3", "level": "BASIC", "key": "3", "points": 3},
+    {"type": "score_snapshot", "label": "Score snapshot", "level": "BASIC"},
+    {"type": "score_correction", "label": "Score correction", "level": "BASIC"},
+    {"type": "turnover", "label": "Turnover", "level": "BASIC", "key": "T"},
+    {"type": "foul", "label": "Foul", "level": "STANDARD", "key": "F"},
+    {"type": "assist", "label": "Assist", "level": "STANDARD", "key": "A"},
+    {"type": "substitution", "label": "Substitution", "level": "STANDARD"},
+    {"type": "rebound", "label": "Rebound", "level": "STANDARD", "key": "R"},
+    {"type": "shot", "label": "Shot detail", "level": "ADVANCED", "key": "S"},
+    {"type": "rebound_off", "label": "Offensive rebound", "level": "ADVANCED"},
+    {"type": "rebound_def", "label": "Defensive rebound", "level": "ADVANCED"},
+    {"type": "steal", "label": "Steal", "level": "ADVANCED"},
+    {"type": "block", "label": "Block", "level": "ADVANCED"},
+    {"type": "custom", "label": "Custom tag", "level": "ADVANCED"}
+  ]
+}

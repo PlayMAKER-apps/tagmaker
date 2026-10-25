@@ -1,0 +1,1 @@
+"""TagMAKER desktop interface."""

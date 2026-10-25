@@ -1,0 +1,22 @@
+{
+  "id": "football", "sport": "football", "label": "Football",
+  "clock_direction": "up", "periods": ["H1", "H2", "ET1", "ET2"],
+  "events": [
+    {"type": "period_start", "label": "Period start", "level": "BASIC", "key": "P"},
+    {"type": "period_end", "label": "Period end", "level": "BASIC", "key": "O"},
+    {"type": "game_start", "label": "Game start", "level": "BASIC"},
+    {"type": "game_stop", "label": "Game stop", "level": "BASIC"},
+    {"type": "goal", "label": "Goal +1", "level": "BASIC", "key": "G", "points": 1},
+    {"type": "score_snapshot", "label": "Score snapshot", "level": "BASIC"},
+    {"type": "score_correction", "label": "Score correction", "level": "BASIC"},
+    {"type": "shot", "label": "Shot", "level": "BASIC", "key": "S"},
+    {"type": "foul", "label": "Foul", "level": "STANDARD", "key": "F"},
+    {"type": "assist", "label": "Assist", "level": "STANDARD", "key": "A"},
+    {"type": "substitution", "label": "Substitution", "level": "STANDARD"},
+    {"type": "yellow_card", "label": "Yellow card", "level": "STANDARD"},
+    {"type": "red_card", "label": "Red card", "level": "STANDARD"},
+    {"type": "shot_detail", "label": "Shot detail", "level": "ADVANCED"},
+    {"type": "tackle", "label": "Tackle", "level": "ADVANCED"},
+    {"type": "custom", "label": "Custom tag", "level": "ADVANCED"}
+  ]
+}

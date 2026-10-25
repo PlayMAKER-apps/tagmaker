@@ -1,0 +1,16 @@
+{
+  "format": "tagmaker-project", "version": "0.1",
+  "project": {
+    "match_id": "example-match", "name": "Home vs Away", "sport": "basketball",
+    "profile_id": "basketball", "level": "BASIC", "season": "2026-27",
+    "teams": [{"id": "home", "name": "Home"}, {"id": "away", "name": "Away"}],
+    "roster": [],
+    "media": [{"media_id": "clip-1", "path": "../media/example.mp4", "duration_ms": 600000, "size_bytes": null}],
+    "events": [{"event_id": "event-1", "match_id": "example-match", "type": "score_2", "sport": "basketball",
+      "source_media_id": "clip-1", "source_time_ms": 121400, "global_video_time_ms": 121400,
+      "period": "Q1", "game_clock_ms": 483000, "clock_direction": "down", "timestamp_quality": "player-reported-ms",
+      "team_id": "home", "player_id": null, "related_event_ids": [], "points": 2, "note": "", "attributes": {}}],
+    "period": "Q1", "game_clock_ms": 483000, "clock_direction": "down", "clock_running": false,
+    "clock_anchor_global_ms": 121400, "shortcuts": {}, "last_global_video_time_ms": 121400
+  }
+}

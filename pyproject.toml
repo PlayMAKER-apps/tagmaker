@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tagmaker"
+version = "0.1.0"
+description = "Offline sports video tagging desktop application"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = ["PySide6-Essentials>=6.7,<7", "python-mpv>=1.0,<2", "PyYAML>=6,<7"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "jsonschema>=4.23,<5"]
+
+[project.scripts]
+tagmaker = "app.main:main"
+
+[tool.setuptools]
+packages = ["app", "app.assets", "playback", "tagging", "storage", "profiles"]
+
+[tool.setuptools.package-data]
+"app.assets" = ["*.ico"]
+profiles = ["*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

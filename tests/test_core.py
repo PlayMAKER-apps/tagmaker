@@ -280,9 +280,17 @@ def test_webmaker_convocati_dialog_and_player_selector(tmp_path: Path):
     assert next_row.y() - (first.y() + first.height()) <= 6
     assert window.log.height() <= 160
     assert not window.windowIcon().isNull()
-    window.team.setCurrentIndex(1)
-    assert [window.player_pick.itemText(i) for i in range(window.player_pick.count())] == [
-        "—", "#0 Ada Rossi", "#12 Bea Verdi"]
+    assert window._our_team_id() == "home"
+    window.project.media = [Media("clip", "clip.mp4")]
+    from playback.timeline import Position
+    window.position = Position("clip", 250, 250, 0)
+    window.tag("score_2")
+    assert not window.project.events
+    assert window.pending_tag is not None
+    labels = [window.tag_layout.itemAt(i).widget().text() for i in range(1, window.tag_layout.count())
+              if hasattr(window.tag_layout.itemAt(i).widget(), "text")]
+    assert "#0 Ada Rossi" in labels and "#12 Bea Verdi" in labels
+    window._cancel_tag()
     window.close(); window.deleteLater(); app.processEvents()
 
 
@@ -308,8 +316,7 @@ def test_webmaker_import_action_reuses_match_player(tmp_path: Path, monkeypatch)
     assert len(window.project.roster) == 1
     assert window.project.roster[0]["number"] == 0
     player_id = window.project.roster[0]["id"]
-    assert window.team.currentData() == "home"
-    assert window.player_pick.itemText(1) == "#0 Ada Rossi"
+    assert window._our_team_id() == "home"
     window.import_webmaker()
     assert len(window.project.roster) == 1
     assert window.project.roster[0]["id"] == player_id
@@ -319,6 +326,8 @@ def test_webmaker_import_action_reuses_match_player(tmp_path: Path, monkeypatch)
 
 
 def test_gui_tag_undo_redo_and_save(tmp_path: Path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
     from app.main import ClipOrderDialog, MainWindow
     from playback.timeline import Position
 
@@ -332,16 +341,44 @@ def test_gui_tag_undo_redo_and_save(tmp_path: Path):
     project = sample()
     path = tmp_path / "gui.sqlite3"
     profile = load_profile(Path(__file__).parents[1] / "profiles" / "basketball.yaml")
-    window = MainWindow(Project("m", "GUI", "basketball", "basketball", teams=project.teams), path, profile)
+    match = Project("m", "GUI", "basketball", "basketball",
+                    teams=project.teams + [{"id": "away", "name": "Away"}])
+    match.roster = [{"id": "p12", "name": "Ada", "team_id": "home", "number": 12,
+                     "called_up": True}]
+    window = MainWindow(match, path, profile)
+    window.show(); app.processEvents()
     window.project.media = project.media
     window.theme_pick.setCurrentText("Dark")
     assert window.project.theme == "dark"
     window.position = Position("two", 100, 10_101, 1)
-    window.team.setCurrentIndex(1)
     window.tag("score_2")
+    assert not window.project.events
+    assert window.pending_tag is not None
+    window.position = Position("two", 500, 10_501, 1)
+    QTest.keyClicks(window.number_entry, "12")
+    QTest.keyClick(window.number_entry, Qt.Key_Return)
     assert len(window.project.events) == 1
+    assert window.project.events[0].team_id == "home"
+    assert window.project.events[0].player_id == "p12"
+    assert window.project.events[0].global_video_time_ms == 10_101
+    assert window.pending_tag is None
     window.undo(); assert not window.project.events
     window.redo(); assert window.project.events[0].points == 2
+    window.tag("score_3")
+    assert window.pending_tag is not None
+    opponent = next(window.tag_layout.itemAt(i).widget()
+                    for i in range(window.tag_layout.count())
+                    if getattr(window.tag_layout.itemAt(i).widget(), "text", lambda: "")()
+                    == "Away (opponent team)")
+    opponent.click()
+    assert window.project.events[-1].team_id == "away"
+    assert window.project.events[-1].player_id is None
+    window.tag("turnover")
+    window._cancel_tag()
+    assert len(window.project.events) == 2
+    window.tag("period_start")
+    assert window.pending_tag is None
+    assert len(window.project.events) == 3
     window.close()
     assert load_project(path).events[0].global_video_time_ms == 10_101
     window.deleteLater()

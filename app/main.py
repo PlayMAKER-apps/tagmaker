@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QIcon, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSlider,
@@ -328,6 +328,8 @@ class MainWindow(QMainWindow):
         self.position = None
         self.last_resume_saved_ms = project.last_global_video_time_ms
         self.shortcuts: list[QShortcut] = []
+        self.event_shortcuts: list[QShortcut] = []
+        self.pending_tag: Event | None = None
         self.player: MpvBackend | None = None
         self._build_ui()
         self._refresh_all()
@@ -396,15 +398,15 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
         right = QWidget(); rv = QVBoxLayout(right)
         self.score = QLabel("Observed points: —"); rv.addWidget(self.score)
-        pick = QFormLayout()
-        self.team = QComboBox(); self.team.currentIndexChanged.connect(self._refresh_players); pick.addRow("Team", self.team)
-        self.player_pick = QComboBox(); pick.addRow("Player", self.player_pick)
-        rv.addLayout(pick)
         roster_actions = QHBoxLayout()
+        self._button(roster_actions, "Our squad", self.set_our_team)
         self._button(roster_actions, "Import WebMAKER", self.import_webmaker)
         self._button(roster_actions, "Convocati", self.edit_convocati)
         self._button(roster_actions, "Add player", self.add_player)
         rv.addLayout(roster_actions)
+        self.tag_prompt = QLabel()
+        self.tag_prompt.setVisible(False)
+        rv.addWidget(self.tag_prompt)
         self.tags = QWidget(); self.tag_layout = QGridLayout(self.tags)
         self.tag_layout.setContentsMargins(4, 4, 4, 4)
         self.tag_layout.setSpacing(4)
@@ -589,11 +591,17 @@ class MainWindow(QMainWindow):
         self._probe_missing()
 
     def add_player(self):
+        team_id = self._our_team_id()
+        if team_id is None:
+            self._error("Add a team before adding players.")
+            return
         name, ok = QInputDialog.getText(self, "Roster", "Player name")
         if not ok or not name.strip(): return
-        team_id = self.team.currentData()
-        self.project.roster.append({"id": new_id(), "name": name.strip(), "team_id": team_id, "called_up": True, "number": None})
-        self._changed(); self._refresh_players()
+        number, ok = QInputDialog.getInt(self, "Roster", "Jersey number (-1 if unknown)", -1, -1, 999)
+        if not ok: return
+        self.project.roster.append({"id": new_id(), "name": name.strip(), "team_id": team_id,
+                                    "called_up": True, "number": None if number == -1 else number})
+        self._changed(); self._render_tags()
 
     def import_webmaker(self):
         folder = QFileDialog.getExistingDirectory(self, "Select WebMAKER project folder", str(Path.home()))
@@ -630,13 +638,13 @@ class MainWindow(QMainWindow):
             self.project.season = source_team.season
         self._changed()
         self._refresh_all()
-        self.team.setCurrentIndex(self.team.findData(target_team_id))
+        self._mark_our_team(target_team_id)
         self.statusBar().showMessage(f"WebMAKER roster: {added} added, {updated} updated. Choose Convocati to adjust the match list.", 10000)
 
     def edit_convocati(self):
-        team_id = self.team.currentData()
+        team_id = self._our_team_id()
         if team_id is None:
-            self._error("Select a team before choosing convocati.")
+            self._error("Add or select our squad before choosing convocati.")
             return
         members = [item for item in self.project.roster if item.get("team_id") == team_id]
         if not members:
@@ -649,7 +657,7 @@ class MainWindow(QMainWindow):
         for member in members:
             member["called_up"] = member["id"] in selected
         self._changed()
-        self._refresh_players()
+        self._render_tags()
 
     def add_team(self):
         name, ok = QInputDialog.getText(self, "Team", "Team name")
@@ -660,36 +668,122 @@ class MainWindow(QMainWindow):
         self._changed()
         self._refresh_all()
 
-    def _refresh_players(self):
-        chosen = self.player_pick.currentData()
-        self.player_pick.clear(); self.player_pick.addItem("—", None)
-        members = [member for member in self.project.roster
-                   if member.get("team_id") == self.team.currentData() and member.get("called_up", True)]
-        for member in sorted(members, key=lambda item: (item.get("number") is None, item.get("number") or 0, item["name"])):
-            number = member.get("number")
-            label = f"#{number} {member['name']}" if number is not None else member["name"]
-            self.player_pick.addItem(label, member["id"])
-        idx = self.player_pick.findData(chosen)
-        if idx >= 0: self.player_pick.setCurrentIndex(idx)
+    def _our_team_id(self):
+        marked = next((team["id"] for team in self.project.teams if team.get("is_our_team")), None)
+        if marked is not None:
+            return marked
+        roster_teams = {member.get("team_id") for member in self.project.roster}
+        return next((team["id"] for team in self.project.teams if team["id"] in roster_teams),
+                    self.project.teams[0]["id"] if self.project.teams else None)
+
+    def _mark_our_team(self, team_id):
+        for team in self.project.teams:
+            team["is_our_team"] = team["id"] == team_id
+        self._changed()
+        self._render_tags()
+
+    def set_our_team(self):
+        if not self.project.teams:
+            self._error("Add a team first.")
+            return
+        names = [team["name"] for team in self.project.teams]
+        current = next((i for i, team in enumerate(self.project.teams)
+                        if team["id"] == self._our_team_id()), 0)
+        name, ok = QInputDialog.getItem(self, "Our squad", "Select the team whose players you tag",
+                                        names, current, False)
+        if ok:
+            self._mark_our_team(self.project.teams[names.index(name)]["id"])
 
     def _refresh_all(self):
-        team_id = self.team.currentData()
-        self.team.clear(); self.team.addItem("—", None)
-        for team in self.project.teams: self.team.addItem(team["name"], team["id"])
-        idx = self.team.findData(team_id)
-        if idx >= 0: self.team.setCurrentIndex(idx)
-        self._refresh_players()
         self.period.blockSignals(True); self.period.setCurrentText(self.project.period or ""); self.period.blockSignals(False)
+        self._render_tags()
+        self._refresh_log()
+
+    def _render_tags(self):
         while self.tag_layout.count():
             child = self.tag_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
+            if child.widget():
+                child.widget().hide()
+                child.widget().deleteLater()
+        self.tag_prompt.setVisible(self.pending_tag is not None)
+        if self.pending_tag is not None:
+            self._render_assignment()
+            return
         for index, definition in enumerate(events_for_level(self.profile, self.project.level)):
             label = definition["label"] + (f" [{self.project.shortcuts.get(definition['type'], definition.get('key'))}]" if self.project.shortcuts.get(definition["type"], definition.get("key")) else "")
             button = QPushButton(label)
             button.setFixedHeight(34)
             button.clicked.connect(lambda _=False, kind=definition["type"]: self.tag(kind))
             self.tag_layout.addWidget(button, index // 2, index % 2)
-        self._refresh_log()
+
+    def _render_assignment(self):
+        definition = next(e for e in self.profile["events"] if e["type"] == self.pending_tag.type)
+        our_id = self._our_team_id()
+        our_team = next((team for team in self.project.teams if team["id"] == our_id), None)
+        self.tag_prompt.setText(f"{definition['label']} at {fmt(self.pending_tag.global_video_time_ms)} — choose who")
+        members = [member for member in self.project.roster
+                   if member.get("team_id") == our_id and member.get("called_up", True)]
+        members.sort(key=lambda member: (member.get("number") is None, member.get("number") or 0, member["name"]))
+        self.number_entry = QLineEdit()
+        self.number_entry.setPlaceholderText("Jersey number + Enter")
+        self.number_entry.setValidator(QIntValidator(0, 999, self.number_entry))
+        self.number_entry.returnPressed.connect(self._choose_number)
+        self.tag_layout.addWidget(self.number_entry, 0, 0, 1, 2)
+        for index, member in enumerate(members):
+            number = member.get("number")
+            label = f"#{number} {member['name']}" if number is not None else member["name"]
+            button = QPushButton(label)
+            button.setFixedHeight(34)
+            button.clicked.connect(lambda _=False, player=member: self._choose_actor(our_id, player["id"]))
+            self.tag_layout.addWidget(button, 1 + index // 2, index % 2)
+        row = 1 + (len(members) + 1) // 2
+        if our_team and not members:
+            button = QPushButton(f"{our_team['name']} (team only)")
+            button.clicked.connect(lambda: self._choose_actor(our_id, None))
+            self.tag_layout.addWidget(button, row, 0, 1, 2)
+            row += 1
+        for team in self.project.teams:
+            if team["id"] == our_id:
+                continue
+            button = QPushButton(f"{team['name']} (opponent team)")
+            button.setFixedHeight(34)
+            button.clicked.connect(lambda _=False, team_id=team["id"]: self._choose_actor(team_id, None))
+            self.tag_layout.addWidget(button, row, 0, 1, 2)
+            row += 1
+        cancel = QPushButton("Cancel (Esc)")
+        cancel.clicked.connect(self._cancel_tag)
+        self.tag_layout.addWidget(cancel, row, 0, 1, 2)
+        self.number_entry.setEnabled(bool(members))
+        if members:
+            self.number_entry.setFocus()
+
+    def _choose_number(self):
+        if self.pending_tag is None:
+            return
+        number = int(self.number_entry.text()) if self.number_entry.text() else None
+        matches = [member for member in self.project.roster
+                   if member.get("team_id") == self._our_team_id() and member.get("called_up", True)
+                   and member.get("number") == number and number is not None]
+        if len(matches) == 1:
+            self._choose_actor(self._our_team_id(), matches[0]["id"])
+        else:
+            self.tag_prompt.setText("Jersey number not found or ambiguous — choose a player button")
+
+    def _choose_actor(self, team_id, player_id):
+        if self.pending_tag is None:
+            return
+        event = self.pending_tag
+        event.team_id, event.player_id = team_id, player_id
+        self._cancel_tag()
+        self._commit_event(event)
+
+    def _cancel_tag(self):
+        if self.pending_tag is None:
+            return
+        self.pending_tag = None
+        for shortcut in self.event_shortcuts:
+            shortcut.setEnabled(True)
+        self._render_tags()
 
     def _remember(self):
         self.undo_stack.append(copy.deepcopy(self.project.events))
@@ -714,10 +808,12 @@ class MainWindow(QMainWindow):
         event = Event(new_id(), self.project.match_id, kind, self.project.sport,
                       pos.media_id, pos.source_time_ms, pos.global_video_time_ms,
                       period=self.project.period, game_clock_ms=clock_at(self.project, pos.global_video_time_ms),
-                      clock_direction=self.project.clock_direction, team_id=self.team.currentData(),
-                      player_id=self.player_pick.currentData(), points=points, attributes=attributes or {})
+                      clock_direction=self.project.clock_direction, points=points, attributes=attributes or {})
+        self._commit_event(event)
+
+    def _commit_event(self, event: Event):
         self._remember(); self.project.events.append(event)
-        self.project.last_global_video_time_ms = pos.global_video_time_ms
+        self.project.last_global_video_time_ms = event.global_video_time_ms
         self._changed(); self._refresh_log()
 
     def tag(self, kind: str):
@@ -725,7 +821,26 @@ class MainWindow(QMainWindow):
         points = definition.get("points")
         try: validate_event_type(self.project, self.profile, kind, points)
         except ValueError as exc: self._error(str(exc)); return
-        self._add_event(kind, points)
+        if kind in {"score_snapshot", "score_correction"}:
+            self.score_correction(kind)
+            return
+        if kind in {"period_start", "period_end", "game_start", "game_stop",
+                    "clock_sync"}:
+            self._add_event(kind, points)
+            return
+        pos = self._current_time()
+        if pos is None: return
+        if not self.project.teams:
+            self._error("Add teams before tagging this event.")
+            return
+        self.pending_tag = Event(new_id(), self.project.match_id, kind, self.project.sport,
+                                 pos.media_id, pos.source_time_ms, pos.global_video_time_ms,
+                                 period=self.project.period,
+                                 game_clock_ms=clock_at(self.project, pos.global_video_time_ms),
+                                 clock_direction=self.project.clock_direction, points=points)
+        for shortcut in self.event_shortcuts:
+            shortcut.setEnabled(False)
+        self._render_tags()
 
     def _refresh_log(self):
         self.log.setRowCount(0)
@@ -827,10 +942,11 @@ class MainWindow(QMainWindow):
         self._add_event("clock_sync", attributes={"previous_game_clock_ms": original, "new_game_clock_ms": value_ms})
         self._changed()
 
-    def score_correction(self):
+    def score_correction(self, kind=None):
         if not self.project.teams: self._error("Add teams to record a score."); return
-        kind, ok = QInputDialog.getItem(self, "Score", "Record", ["score_snapshot", "score_correction"], editable=False)
-        if not ok: return
+        if kind not in {"score_snapshot", "score_correction"}:
+            kind, ok = QInputDialog.getItem(self, "Score", "Record", ["score_snapshot", "score_correction"], editable=False)
+            if not ok: return
         scores = {}
         for team in self.project.teams:
             value, ok = QInputDialog.getInt(self, "Score snapshot", team["name"], 0, 0, 9999)
@@ -869,15 +985,21 @@ class MainWindow(QMainWindow):
     def _bind_shortcuts(self):
         for shortcut in self.shortcuts: shortcut.setEnabled(False); shortcut.deleteLater()
         self.shortcuts.clear()
+        self.event_shortcuts.clear()
         bindings = {"Space": self._toggle_play, "Left": lambda: self._skip(-5000),
                     "Right": lambda: self._skip(5000), "Ctrl+Z": self.undo, "Ctrl+Y": self.redo,
-                    ".": self._frame}
+                    ".": self._frame, "Esc": self._cancel_tag}
+        playback_keys = set(bindings)
         for event in events_for_level(self.profile, self.project.level):
             key = self.project.shortcuts.get(event["type"], event.get("key"))
             if key and key not in bindings: bindings[key] = lambda kind=event["type"]: self.tag(kind)
         for sequence, action in bindings.items():
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.activated.connect(action); self.shortcuts.append(shortcut)
+            if sequence not in playback_keys:
+                self.event_shortcuts.append(shortcut)
+                if self.pending_tag is not None:
+                    shortcut.setEnabled(False)
 
     def edit_shortcuts(self):
         labels = [f"{e['type']}: {self.project.shortcuts.get(e['type'], e.get('key', ''))}" for e in events_for_level(self.profile, self.project.level)]
@@ -889,7 +1011,7 @@ class MainWindow(QMainWindow):
         if value and QKeySequence(value).isEmpty(): self._error("Invalid shortcut"); return
         if value:
             normalized = QKeySequence(value).toString()
-            reserved = {QKeySequence(key).toString() for key in ("Space", "Left", "Right", "Ctrl+Z", "Ctrl+Y", ".")}
+            reserved = {QKeySequence(key).toString() for key in ("Space", "Left", "Right", "Ctrl+Z", "Ctrl+Y", ".", "Esc", "Return", "Enter")}
             if normalized in reserved:
                 self._error("This shortcut is reserved for playback or undo/redo."); return
             for event in events_for_level(self.profile, self.project.level):

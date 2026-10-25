@@ -44,7 +44,7 @@ The source label shows the current clip time and whole-match video time. Use pla
 
 Select **Import WebMAKER** and choose a WebMAKER project folder with `site/data/rosters.csv`, `site/data/teams.yaml`, and `site/data/players/*.yaml` or `*.yml`. TagMAKER reads these files without changing them. Choose the source season, competition, and team, then map that team to a TagMAKER team or create one.
 
-Tick the players called up for this match. Everyone in the selected roster is imported, but only called-up players appear in the tagging selector, with **jersey number and name**. Players marked inactive in WebMAKER start unticked. **Convocati** edits this selection later. Reimporting refreshes roster information while retaining TagMAKER player IDs already used by events.
+Tick the players called up for this match. Everyone in the selected roster is imported, but only called-up players appear when you assign a tag, with **jersey number and name**. Players marked inactive in WebMAKER start unticked. **Convocati** edits this selection later. Reimporting refreshes roster information while retaining TagMAKER player IDs already used by events. **Our squad** chooses which TagMAKER team has individual players; other teams are tagged as a whole.
 
 ![Importing a WebMAKER roster and choosing called-up players](docs/images/03-import-roster.png)
 
@@ -52,9 +52,11 @@ Tick the players called up for this match. Everyone in the selected roster is im
 
 ### 5. Tag the video
 
-Choose a **Team** and, when an event belongs to a player, a **Player**. Click an event button or use its displayed shortcut. TagMAKER records the libmpv-reported video position while playback continues. The event buttons are in two columns with a 4 px row gap; a compact history is below them.
+Click an event button or use its displayed shortcut. For a player or team event such as a basket, the buttons change to the called-up players in **Our squad** and a single team-level choice for each opponent. Click a player or type their jersey number and press `Enter`; click the opponent's team button to record an event without an opponent player. `Esc` or **Cancel** discards the pending tag. The video timestamp is captured when you first choose the event, even if playback continues while you select the actor. Period and game controls record immediately. The event buttons are in two columns with a 4 px row gap; a compact history is below them.
 
 ![Main tagging screen with synthetic footage and event history](docs/images/05-tagging.png)
+
+![Choosing the player or opposing squad after selecting a scoring event](docs/images/06-choose-actor.png)
 
 General shortcuts: `Space` toggles playback, `←` and `→` jump five seconds, `.` steps one frame, `Ctrl+Z` undoes, and `Ctrl+Y` redoes. Event shortcuts depend on the sport profile. **Shortcuts** lets you change them and detects conflicts. Double-click a history row to edit or remove an event, including its note, team, player, attributes, and event relationships.
 
@@ -62,7 +64,7 @@ General shortcuts: `Space` toggles playback, `←` and `→` jump five seconds, 
 
 Video time includes introductions, breaks, and stoppages. It is **independent of the official match clock**. Select a period, choose **Sync clock**, and enter the visible `MM:SS.mmm` value. Use **Clock start/stop** when the official clock starts or stops. Without a manual sync, an event still has video time, but `game_clock_ms` is null.
 
-Choose the scoring team before recording a basket or goal. The on-screen score initially sums observed scoring tags. If tagging starts in the middle of a match or events are missing, use **Score snapshot / correction** to record known team totals. A partial tag log must not be treated as a verified final result.
+Choose a scoring event, then assign it to one of our players or the opposing squad. The on-screen score initially sums observed scoring tags. If tagging starts in the middle of a match or events are missing, use **Score snapshot / correction** to record known team totals. A partial tag log must not be treated as a verified final result.
 
 ### 7. Save, reopen, and relocate
 

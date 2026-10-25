@@ -6,6 +6,8 @@ and fixture match TagMAKER's existing export. VideoMAKER has no importer yet;
 its implementation should use the contract and add tests for clip boundaries,
 null game clocks, VFR timestamp estimates, event relationships, and score
 corrections. Future incompatible changes require a new version and fixtures.
+The optional `teams[].is_our_team` marker identifies the squad whose roster is
+tagged individually; opposing events keep `team_id` and omit `player_id`.
 
 WebMAKER Studio uses a separate per-game player-stat CSV. TagMAKER's **Export
 WebMAKER** action creates that file using source game/player IDs and only

@@ -122,6 +122,10 @@ class Project:
         player_ids = {p.get("id") for p in self.roster}
         if len(team_ids) != len(self.teams) or len(player_ids) != len(self.roster):
             raise ValueError("Duplicate team/player ID")
+        if any(not isinstance(team.get("is_our_team", False), bool) for team in self.teams):
+            raise ValueError("Invalid our squad marker")
+        if sum(team.get("is_our_team", False) for team in self.teams) > 1:
+            raise ValueError("More than one team is marked as our squad")
         for event in self.events:
             event.validate()
             if event.event_id in seen or event.match_id != self.match_id or event.sport != self.sport:

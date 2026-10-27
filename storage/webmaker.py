@@ -237,4 +237,6 @@ def import_group(project: Project, rows: list[RosterCandidate], target_team_id: 
             "webmaker_season": row.season,
             "webmaker_competition": row.competition,
         })
+        if not member["called_up"]:
+            member["starter"] = False
     return added, updated

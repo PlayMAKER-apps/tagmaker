@@ -6,6 +6,12 @@ visible `PRIVATE_TEST_BUILD.txt` marker; the bundled local test DLL has not
 passed the redistribution audit in `docs/licenses.md`. Do not publish this
 candidate.
 
+The Windows installer registers the `.tagmaker` project extension with a
+grayscale icon. Older `.tagmaker.sqlite3` and `.sqlite3` files continue to open
+from the app's **Open project** dialog; the installer does not change the
+system-wide `.sqlite3` association. The build script removes the foreign ICU
+DLL selected from Codex's Poppler tools so packaged Qt loads the Windows ICU.
+
 ```powershell
 .\packaging\build_windows.ps1 -MpvDll .\.local-tools\mpv\libmpv-2.dll
 ```

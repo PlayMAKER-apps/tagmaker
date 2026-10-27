@@ -12,3 +12,5 @@ dist/
 build/
 *.sqlite3
 *.sqlite3-*
+*.tagmaker
+*.tagmaker-*

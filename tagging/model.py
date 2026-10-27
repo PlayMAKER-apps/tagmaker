@@ -77,6 +77,13 @@ class Event:
             new_clock = self.attributes.get("new_game_clock_ms")
             if type(new_clock) is not int or new_clock < 0:
                 raise ValueError("Clock sync needs new_game_clock_ms")
+        if self.type == "substitution" and ("player_out_id" in self.attributes or "player_in_id" in self.attributes):
+            outgoing = self.attributes.get("player_out_id")
+            incoming = self.attributes.get("player_in_id")
+            if not all(isinstance(item, str) and item for item in (outgoing, incoming)) or outgoing == incoming:
+                raise ValueError("Substitution needs two different players")
+            if self.player_id != outgoing:
+                raise ValueError("Substitution player_id must be the outgoing player")
 
 
 @dataclass
@@ -136,6 +143,14 @@ class Project:
                 raise ValueError("Event refers to missing team")
             if event.player_id is not None and event.player_id not in player_ids:
                 raise ValueError("Event refers to missing player")
+            if event.type == "substitution" and "player_in_id" in event.attributes:
+                incoming = next((member for member in self.roster
+                                 if member["id"] == event.attributes["player_in_id"]), None)
+                outgoing = next((member for member in self.roster
+                                 if member["id"] == event.player_id), None)
+                if incoming is None or outgoing is None or any(member.get("team_id") != event.team_id
+                                                                for member in (incoming, outgoing)):
+                    raise ValueError("Substitution players must belong to the tagged team")
             if event.type in {"score_snapshot", "score_correction"} and any(team not in team_ids for team in event.attributes["scores"]):
                 raise ValueError("Score refers to missing team")
             seen.add(event.event_id)

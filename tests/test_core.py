@@ -142,9 +142,11 @@ def test_webmaker_roster_import_keeps_ids_and_jersey_numbers(tmp_path: Path):
     first_id = project.roster[0]["id"]
     assert project.roster[0]["number"] == 0
     assert project.roster[1]["called_up"] is False
+    project.roster[0]["starter"] = True
     assert import_group(project, candidates, "home", {"bea"}) == (0, 2)
     assert project.roster[0]["id"] == first_id
     assert project.roster[0]["called_up"] is False
+    assert project.roster[0]["starter"] is False
     assert project.roster[1]["called_up"] is True
     project.validate()
 
@@ -278,7 +280,7 @@ def test_webmaker_convocati_dialog_and_player_selector(tmp_path: Path):
     first = window.tag_layout.itemAt(0).widget()
     next_row = window.tag_layout.itemAt(2).widget()
     assert next_row.y() - (first.y() + first.height()) <= 6
-    assert window.log.height() <= 160
+    assert 170 <= window.log.height() <= 260
     assert not window.windowIcon().isNull()
     assert window._our_team_id() == "home"
     window.project.media = [Media("clip", "clip.mp4")]
@@ -384,6 +386,71 @@ def test_gui_tag_undo_redo_and_save(tmp_path: Path):
     window.deleteLater()
     app.processEvents()
     assert app is not None
+
+
+def test_starting_five_substitution_and_box_score(tmp_path: Path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog
+    from app.main import MainWindow, StartingLineupDialog
+    from playback.timeline import Position
+
+    app = qt_app()
+    profile = load_profile(Path(__file__).parents[1] / "profiles" / "basketball.yaml")
+    project = Project("lineup", "Lineup", "basketball", "basketball", level="STANDARD",
+                      teams=[{"id": "home", "name": "Home", "is_our_team": True},
+                             {"id": "away", "name": "Away"}])
+    project.roster = [{"id": f"p{i}", "name": f"Player {i}", "team_id": "home",
+                       "number": i, "called_up": True} for i in range(1, 7)]
+    lineup = StartingLineupDialog(project.roster)
+    for index in range(5):
+        lineup.table.item(index, 0).setCheckState(Qt.Checked)
+    assert len(lineup.starter_ids()) == 5
+    lineup._accept_five()
+    assert lineup.result() == QDialog.Accepted
+    lineup.close(); lineup.deleteLater()
+
+    monkeypatch.setattr(StartingLineupDialog, "exec", lambda _self: QDialog.Accepted)
+    monkeypatch.setattr(StartingLineupDialog, "starter_ids", lambda _self: {f"p{i}" for i in range(1, 6)})
+    window = MainWindow(project, tmp_path / "lineup.tagmaker", profile)
+    window.show(); app.processEvents()
+    window.project.media = [Media("clip", "clip.mp4", 10000)]
+    window.edit_starting_lineup()
+    assert sum(member.get("starter", False) for member in window.project.roster) == 5
+    assert window.pages.tabText(1) == "Box score"
+    assert window.box_table.rowCount() == 6
+    window.position = Position("clip", 1000, 1000, 0)
+    window.tag("substitution")
+    assert not window.project.events
+    window._choose_actor("home", "p1")
+    assert window.pending_tag is not None and window.pending_sub_out_id == "p1"
+    window.position = Position("clip", 2000, 2000, 0)
+    window._choose_actor("home", "p6")
+    event = window.project.events[0]
+    assert event.global_video_time_ms == 1000
+    assert event.player_id == "p1"
+    assert event.attributes == {"player_out_id": "p1", "player_in_id": "p6"}
+    assert window.log.item(0, 2).text() == "Sub #1 → #6"
+    assert window.box_table.item(0, 13).text() == "0 / 1"
+    assert window.box_table.item(5, 13).text() == "1 / 0"
+    window.close(); window.deleteLater(); app.processEvents()
+    assert load_project(tmp_path / "lineup.tagmaker").events[0].attributes == event.attributes
+
+
+def test_basic_basketball_has_no_clock_controls(tmp_path: Path):
+    from app.main import MainWindow
+
+    app = qt_app()
+    profile = load_profile(Path(__file__).parents[1] / "profiles" / "basketball.yaml")
+    project = Project("basic", "Basic", "basketball", "basketball", level="BASIC",
+                      teams=[{"id": "home", "name": "Home"}])
+    window = MainWindow(project, tmp_path / "basic.tagmaker", profile)
+    window.show(); app.processEvents()
+    assert not window.clock_label.isVisible()
+    assert not window.clock_controls.isVisible()
+    assert {event["type"] for event in window._available_events()}.isdisjoint(
+        {"period_start", "period_end", "game_start", "game_stop"})
+    assert not window.windowIcon().isNull()
+    window.close(); window.deleteLater(); app.processEvents()
 
 
 def test_missing_clip_is_reported(tmp_path: Path):

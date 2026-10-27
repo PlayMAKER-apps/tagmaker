@@ -23,9 +23,19 @@ try {
         --icon (Join-Path $repo "app\assets\tagmaker.ico") `
         --add-data "$(Join-Path $repo 'profiles');profiles" `
         --add-data "$(Join-Path $repo 'app\assets\tagmaker.ico');app\assets" `
+        --add-data "$(Join-Path $repo 'app\assets\tagmaker-file.ico');app\assets" `
         --add-binary "$dll;." `
         "app\main.py"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+    # Qt 6 on Windows imports the system ICU's unversioned symbols. PyInstaller
+    # can pick up Codex's Poppler ICU from PATH; that DLL exports versioned
+    # symbols instead and makes the frozen QtCore import fail at startup.
+    foreach ($foreignIcu in @("icuuc.dll", "icudt78.dll", "icuin.dll")) {
+        $candidate = Join-Path $repo "dist\TagMAKER\$foreignIcu"
+        if (Test-Path -LiteralPath $candidate) {
+            Remove-Item -LiteralPath $candidate -Force
+        }
+    }
     Copy-Item -LiteralPath "LICENSE" -Destination "dist\TagMAKER\LICENSE.txt" -Force
     Copy-Item -LiteralPath "README.md" -Destination "dist\TagMAKER\README.md" -Force
     Copy-Item -LiteralPath "docs\licenses.md" -Destination "dist\TagMAKER\THIRD_PARTY_REVIEW.md" -Force

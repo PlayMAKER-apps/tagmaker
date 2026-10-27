@@ -11,9 +11,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QFileDialog, QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSlider,
-    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+    QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from playback.mpv_backend import MpvBackend, probe_duration
 from playback.timeline import Timeline
@@ -22,6 +22,7 @@ from storage.interchange import export_csv, export_json, import_json, media_refe
 from storage.webmaker import (RosterCandidate, export_webmaker_stats, import_group,
                               load_webmaker_games, load_webmaker_roster)
 from tagging.clock import clock_at, set_running, sync_clock
+from tagging.boxscore import basketball_box_score
 from tagging.model import Event, Media, Project, new_id
 from tagging.profiles import available_profiles, events_for_level, load_profile, validate_event_type
 
@@ -29,6 +30,7 @@ ICON_PATH = Path(__file__).resolve().parent / "assets" / "tagmaker.ico"
 VIDEO_FILE_FILTER = (
     "Video files (*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.mts *.m2ts *.MTS *.M2TS);;All files (*)"
 )
+PROJECT_FILE_FILTER = "TagMAKER projects (*.tagmaker *.tagmaker.sqlite3);;Legacy SQLite projects (*.sqlite3)"
 
 
 def fmt(ms: int | None) -> str:
@@ -96,15 +98,17 @@ class StartDialog(QDialog):
     def make_new(self):
         if not self.name.text().strip():
             QMessageBox.warning(self, "Match name", "Enter a match name."); return
-        file, _ = QFileDialog.getSaveFileName(self, "New project", self.name.text().strip() + ".tagmaker.sqlite3", "TagMAKER (*.sqlite3)")
+        file, _ = QFileDialog.getSaveFileName(self, "New project", self.name.text().strip() + ".tagmaker", PROJECT_FILE_FILTER)
         if not file: return
         if Path(file).exists():
             QMessageBox.warning(self, "Project exists", "Choose a new project file."); return
         profile = self.profile.currentData()
+        basic_basketball = profile["sport"] == "basketball" and self.level.currentText() == "BASIC"
         teams = [{"id": new_id(), "name": name.strip()} for name in (self.team_a.text(), self.team_b.text()) if name.strip()]
         self.project = Project(new_id(), self.name.text().strip(), profile["sport"], profile["id"],
                                self.level.currentText(), self.season.text().strip(), teams=teams,
-                               clock_direction=profile.get("clock_direction"), period=profile.get("periods", [None])[0],
+                               clock_direction=None if basic_basketball else profile.get("clock_direction"),
+                               period=None if basic_basketball else profile.get("periods", [None])[0],
                                profile_data=profile)
         self.path = Path(file)
         self.profile_data = profile
@@ -112,7 +116,7 @@ class StartDialog(QDialog):
         self.accept()
 
     def open_existing(self):
-        file, _ = QFileDialog.getOpenFileName(self, "Open project", "", "TagMAKER (*.sqlite3)")
+        file, _ = QFileDialog.getOpenFileName(self, "Open project", "", PROJECT_FILE_FILTER)
         if not file: return
         try:
             self.project = load_project(file)
@@ -131,7 +135,7 @@ class StartDialog(QDialog):
             project = import_json(file)
             profile = project.profile_data or next((p for p in self.profiles if p["id"] == project.profile_id), None)
             if profile is None: raise ValueError("Load the matching custom profile first")
-            db, _ = QFileDialog.getSaveFileName(self, "Save imported project", Path(file).stem + ".tagmaker.sqlite3", "TagMAKER (*.sqlite3)")
+            db, _ = QFileDialog.getSaveFileName(self, "Save imported project", Path(file).stem + ".tagmaker", PROJECT_FILE_FILTER)
             if not db: return
             if Path(db).exists(): raise ValueError("Choose a new database file")
             # Rebase media paths from the JSON's location to the new project location.
@@ -305,10 +309,51 @@ class ConvocatiDialog(QDialog):
                 if self.table.item(row, 0).checkState() == Qt.Checked}
 
 
+class StartingLineupDialog(QDialog):
+    def __init__(self, players: list[dict], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Starting five")
+        self.resize(480, 560)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Choose exactly five called-up players who start the match."))
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Start", "Number", "Player"])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+        for member in sorted(players, key=lambda item: (item.get("number") is None,
+                                                        item.get("number") or 0, item["name"])):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            choice = QTableWidgetItem()
+            choice.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+            choice.setCheckState(Qt.Checked if member.get("starter", False) else Qt.Unchecked)
+            choice.setData(Qt.UserRole, member["id"])
+            self.table.setItem(row, 0, choice)
+            self.table.setItem(row, 1, QTableWidgetItem("" if member.get("number") is None
+                                                      else str(member["number"])))
+            self.table.setItem(row, 2, QTableWidgetItem(member["name"]))
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._accept_five)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def starter_ids(self) -> set[str]:
+        return {self.table.item(row, 0).data(Qt.UserRole) for row in range(self.table.rowCount())
+                if self.table.item(row, 0).checkState() == Qt.Checked}
+
+    def _accept_five(self):
+        if len(self.starter_ids()) != 5:
+            QMessageBox.warning(self, "Starting five", "Choose exactly five starters.")
+            return
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, project: Project, path: Path, profile: dict):
         super().__init__()
         self.project, self.path, self.profile = project, path, profile
+        self.basic_basketball = project.sport == "basketball" and project.level == "BASIC"
         self.setWindowTitle(f"TagMAKER — {project.name}")
         self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.resize(1280, 800)
@@ -330,6 +375,7 @@ class MainWindow(QMainWindow):
         self.shortcuts: list[QShortcut] = []
         self.event_shortcuts: list[QShortcut] = []
         self.pending_tag: Event | None = None
+        self.pending_sub_out_id: str | None = None
         self.player: MpvBackend | None = None
         self._build_ui()
         self._refresh_all()
@@ -350,7 +396,9 @@ class MainWindow(QMainWindow):
             self._probe_missing()
 
     def _build_ui(self):
-        root = QWidget(); self.setCentralWidget(root)
+        self.pages = QTabWidget()
+        self.setCentralWidget(self.pages)
+        root = QWidget(); self.pages.addTab(root, "Tagging")
         outer = QVBoxLayout(root)
         toolbar = QHBoxLayout()
         self._button(toolbar, "Add clips", self.add_clips)
@@ -389,12 +437,16 @@ class MainWindow(QMainWindow):
         lv.addLayout(controls)
         self.clock_label = QLabel("Game clock: --:--.---")
         lv.addWidget(self.clock_label)
-        clock_row = QHBoxLayout()
+        self.clock_controls = QWidget()
+        clock_row = QHBoxLayout(self.clock_controls)
+        clock_row.setContentsMargins(0, 0, 0, 0)
         self.period = QComboBox(); self.period.addItems(self.profile.get("periods", [])); self.period.currentTextChanged.connect(self._period_changed)
         clock_row.addWidget(self.period)
         self._button(clock_row, "Clock start/stop", self._clock_toggle)
         self._button(clock_row, "Sync clock", self._clock_sync)
-        lv.addLayout(clock_row)
+        lv.addWidget(self.clock_controls)
+        self.clock_label.setVisible(not self.basic_basketball)
+        self.clock_controls.setVisible(not self.basic_basketball)
         splitter.addWidget(left)
         right = QWidget(); rv = QVBoxLayout(right)
         self.score = QLabel("Observed points: —"); rv.addWidget(self.score)
@@ -409,25 +461,51 @@ class MainWindow(QMainWindow):
         rv.addWidget(self.tag_prompt)
         self.tags = QWidget(); self.tag_layout = QGridLayout(self.tags)
         self.tag_layout.setContentsMargins(4, 4, 4, 4)
-        self.tag_layout.setSpacing(4)
+        self.tag_layout.setSpacing(3)
         self.tag_layout.setAlignment(Qt.AlignTop)
         self.tag_scroll = QScrollArea()
         self.tag_scroll.setWidgetResizable(True)
         self.tag_scroll.setWidget(self.tags)
-        self.tag_scroll.setMinimumHeight(350)
+        self.tag_scroll.setMinimumHeight(355)
         rv.addWidget(self.tag_scroll, 4)
-        self._button(rv, "Score snapshot / correction", self.score_correction)
-        self._button(rv, "Undo (Ctrl+Z)", self.undo)
-        self._button(rv, "Redo (Ctrl+Y)", self.redo)
+        history_actions = QHBoxLayout()
+        self._button(history_actions, "Undo (Ctrl+Z)", self.undo)
+        self._button(history_actions, "Redo (Ctrl+Y)", self.redo)
+        rv.addLayout(history_actions)
         rv.addWidget(QLabel("Events — double click to edit"))
         self.log = QTableWidget(0, 5)
-        self.log.setMinimumHeight(105)
-        self.log.setMaximumHeight(160)
+        self.log.setMinimumHeight(170)
+        self.log.setMaximumHeight(260)
         self.log.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.log.setHorizontalHeaderLabels(["Video", "Game", "Type", "Team", "Note"])
+        self.log.setColumnWidth(2, 170)
         self.log.cellDoubleClicked.connect(self.edit_event)
-        rv.addWidget(self.log, 1)
+        rv.addWidget(self.log, 2)
         splitter.addWidget(right); splitter.setSizes([800, 480])
+        if self.project.sport == "basketball":
+            box_page = QWidget()
+            box_layout = QVBoxLayout(box_page)
+            actions = QHBoxLayout()
+            self._button(actions, "Starting five", self.edit_starting_lineup)
+            actions.addStretch()
+            box_layout.addLayout(actions)
+            self.box_match_score = QLabel()
+            box_layout.addWidget(self.box_match_score)
+            self.box_summary = QLabel("Observed player statistics")
+            self.box_summary.setWordWrap(True)
+            box_layout.addWidget(self.box_summary)
+            self.box_table = QTableWidget(0, 14)
+            self.box_table.setHorizontalHeaderLabels([
+                "#", "Player", "Start", "PTS", "FTM", "2PM", "3PM", "REB",
+                "OFF", "DEF", "AST", "FOUL", "TO", "IN / OUT",
+            ])
+            self.box_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.box_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.box_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            self.box_table.setWordWrap(False)
+            box_layout.addWidget(self.box_table, 1)
+            box_layout.addWidget(QLabel("Observed tags only. Playing minutes and untagged actions are not estimated."))
+            self.pages.addTab(box_page, "Box score")
         self._apply_theme()
 
     def _theme_changed(self, value: str):
@@ -601,7 +679,7 @@ class MainWindow(QMainWindow):
         if not ok: return
         self.project.roster.append({"id": new_id(), "name": name.strip(), "team_id": team_id,
                                     "called_up": True, "number": None if number == -1 else number})
-        self._changed(); self._render_tags()
+        self._changed(); self._render_tags(); self._refresh_box_score()
 
     def import_webmaker(self):
         folder = QFileDialog.getExistingDirectory(self, "Select WebMAKER project folder", str(Path.home()))
@@ -656,8 +734,28 @@ class MainWindow(QMainWindow):
         selected = dialog.called_up_ids()
         for member in members:
             member["called_up"] = member["id"] in selected
+            if not member["called_up"]:
+                member["starter"] = False
         self._changed()
         self._render_tags()
+        self._refresh_box_score()
+
+    def edit_starting_lineup(self):
+        team_id = self._our_team_id()
+        members = [member for member in self.project.roster
+                   if member.get("team_id") == team_id and member.get("called_up", True)]
+        if len(members) < 5:
+            self._error("Choose at least five called-up players in Convocati first.")
+            return
+        dialog = StartingLineupDialog(members, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        selected = dialog.starter_ids()
+        for member in self.project.roster:
+            if member.get("team_id") == team_id:
+                member["starter"] = member["id"] in selected
+        self._changed()
+        self._refresh_box_score()
 
     def add_team(self):
         name, ok = QInputDialog.getText(self, "Team", "Team name")
@@ -681,6 +779,7 @@ class MainWindow(QMainWindow):
             team["is_our_team"] = team["id"] == team_id
         self._changed()
         self._render_tags()
+        self._refresh_box_score()
 
     def set_our_team(self):
         if not self.project.teams:
@@ -699,6 +798,13 @@ class MainWindow(QMainWindow):
         self._render_tags()
         self._refresh_log()
 
+    def _available_events(self):
+        events = events_for_level(self.profile, self.project.level)
+        if self.basic_basketball:
+            time_events = {"period_start", "period_end", "game_start", "game_stop"}
+            events = [event for event in events if event["type"] not in time_events]
+        return events
+
     def _render_tags(self):
         while self.tag_layout.count():
             child = self.tag_layout.takeAt(0)
@@ -709,10 +815,10 @@ class MainWindow(QMainWindow):
         if self.pending_tag is not None:
             self._render_assignment()
             return
-        for index, definition in enumerate(events_for_level(self.profile, self.project.level)):
+        for index, definition in enumerate(self._available_events()):
             label = definition["label"] + (f" [{self.project.shortcuts.get(definition['type'], definition.get('key'))}]" if self.project.shortcuts.get(definition["type"], definition.get("key")) else "")
             button = QPushButton(label)
-            button.setFixedHeight(34)
+            button.setFixedHeight(31)
             button.clicked.connect(lambda _=False, kind=definition["type"]: self.tag(kind))
             self.tag_layout.addWidget(button, index // 2, index % 2)
 
@@ -720,9 +826,15 @@ class MainWindow(QMainWindow):
         definition = next(e for e in self.profile["events"] if e["type"] == self.pending_tag.type)
         our_id = self._our_team_id()
         our_team = next((team for team in self.project.teams if team["id"] == our_id), None)
-        self.tag_prompt.setText(f"{definition['label']} at {fmt(self.pending_tag.global_video_time_ms)} — choose who")
+        substitution = self.pending_tag.type == "substitution"
+        if substitution:
+            step = "player entering" if self.pending_sub_out_id else "player leaving"
+            self.tag_prompt.setText(f"Substitution at {fmt(self.pending_tag.global_video_time_ms)} — choose {step}")
+        else:
+            self.tag_prompt.setText(f"{definition['label']} at {fmt(self.pending_tag.global_video_time_ms)} — choose who")
         members = [member for member in self.project.roster
-                   if member.get("team_id") == our_id and member.get("called_up", True)]
+                   if member.get("team_id") == our_id and member.get("called_up", True)
+                   and member["id"] != self.pending_sub_out_id]
         members.sort(key=lambda member: (member.get("number") is None, member.get("number") or 0, member["name"]))
         self.number_entry = QLineEdit()
         self.number_entry.setPlaceholderText("Jersey number + Enter")
@@ -733,22 +845,28 @@ class MainWindow(QMainWindow):
             number = member.get("number")
             label = f"#{number} {member['name']}" if number is not None else member["name"]
             button = QPushButton(label)
-            button.setFixedHeight(34)
+            button.setFixedHeight(31)
             button.clicked.connect(lambda _=False, player=member: self._choose_actor(our_id, player["id"]))
             self.tag_layout.addWidget(button, 1 + index // 2, index % 2)
         row = 1 + (len(members) + 1) // 2
-        if our_team and not members:
+        if our_team and not members and not substitution:
             button = QPushButton(f"{our_team['name']} (team only)")
             button.clicked.connect(lambda: self._choose_actor(our_id, None))
             self.tag_layout.addWidget(button, row, 0, 1, 2)
             row += 1
-        for team in self.project.teams:
-            if team["id"] == our_id:
-                continue
-            button = QPushButton(f"{team['name']} (opponent team)")
-            button.setFixedHeight(34)
-            button.clicked.connect(lambda _=False, team_id=team["id"]: self._choose_actor(team_id, None))
-            self.tag_layout.addWidget(button, row, 0, 1, 2)
+        if not substitution:
+            for team in self.project.teams:
+                if team["id"] == our_id:
+                    continue
+                button = QPushButton(f"{team['name']} (opponent team)")
+                button.setFixedHeight(31)
+                button.clicked.connect(lambda _=False, team_id=team["id"]: self._choose_actor(team_id, None))
+                self.tag_layout.addWidget(button, row, 0, 1, 2)
+                row += 1
+        elif self.pending_sub_out_id:
+            back = QPushButton("Back to player leaving")
+            back.clicked.connect(self._substitution_back)
+            self.tag_layout.addWidget(back, row, 0, 1, 2)
             row += 1
         cancel = QPushButton("Cancel (Esc)")
         cancel.clicked.connect(self._cancel_tag)
@@ -763,6 +881,7 @@ class MainWindow(QMainWindow):
         number = int(self.number_entry.text()) if self.number_entry.text() else None
         matches = [member for member in self.project.roster
                    if member.get("team_id") == self._our_team_id() and member.get("called_up", True)
+                   and member["id"] != self.pending_sub_out_id
                    and member.get("number") == number and number is not None]
         if len(matches) == 1:
             self._choose_actor(self._our_team_id(), matches[0]["id"])
@@ -773,14 +892,37 @@ class MainWindow(QMainWindow):
         if self.pending_tag is None:
             return
         event = self.pending_tag
+        if event.type == "substitution":
+            if team_id != self._our_team_id() or player_id is None:
+                self._error("Choose two players from Our squad for a substitution.")
+                return
+            if self.pending_sub_out_id is None:
+                self.pending_sub_out_id = player_id
+                self._render_tags()
+                return
+            if player_id == self.pending_sub_out_id:
+                self._error("The player entering must differ from the player leaving.")
+                return
+            event.team_id = team_id
+            event.player_id = self.pending_sub_out_id
+            event.attributes = {"player_out_id": self.pending_sub_out_id,
+                                "player_in_id": player_id}
+            self._cancel_tag()
+            self._commit_event(event)
+            return
         event.team_id, event.player_id = team_id, player_id
         self._cancel_tag()
         self._commit_event(event)
+
+    def _substitution_back(self):
+        self.pending_sub_out_id = None
+        self._render_tags()
 
     def _cancel_tag(self):
         if self.pending_tag is None:
             return
         self.pending_tag = None
+        self.pending_sub_out_id = None
         for shortcut in self.event_shortcuts:
             shortcut.setEnabled(True)
         self._render_tags()
@@ -817,6 +959,8 @@ class MainWindow(QMainWindow):
         self._changed(); self._refresh_log()
 
     def tag(self, kind: str):
+        if self.pages.currentIndex() != 0:
+            self.pages.setCurrentIndex(0)
         definition = next(e for e in self.profile["events"] if e["type"] == kind)
         points = definition.get("points")
         try: validate_event_type(self.project, self.profile, kind, points)
@@ -833,6 +977,14 @@ class MainWindow(QMainWindow):
         if not self.project.teams:
             self._error("Add teams before tagging this event.")
             return
+        if kind == "substitution":
+            team_id = self._our_team_id()
+            called = [member for member in self.project.roster
+                      if member.get("team_id") == team_id and member.get("called_up", True)]
+            if len(called) < 2:
+                self._error("Choose at least two called-up players for Our squad before tagging a substitution.")
+                return
+        self.pending_sub_out_id = None
         self.pending_tag = Event(new_id(), self.project.match_id, kind, self.project.sport,
                                  pos.media_id, pos.source_time_ms, pos.global_video_time_ms,
                                  period=self.project.period,
@@ -847,9 +999,24 @@ class MainWindow(QMainWindow):
         for event in sorted(self.project.events, key=lambda e: e.global_video_time_ms):
             row = self.log.rowCount(); self.log.insertRow(row)
             team = next((t["name"] for t in self.project.teams if t["id"] == event.team_id), "")
-            values = [fmt(event.global_video_time_ms), fmt(event.game_clock_ms), event.type, team, event.note]
+            def actor_label(player_id):
+                member = next((person for person in self.project.roster if person["id"] == player_id), None)
+                if member is None:
+                    return "?"
+                return f"#{member['number']}" if member.get("number") is not None else member["name"]
+            if event.type == "substitution":
+                outgoing = event.attributes.get("player_out_id", event.player_id)
+                incoming = event.attributes.get("player_in_id")
+                kind_label = f"Sub {actor_label(outgoing)} → {actor_label(incoming)}"
+            elif event.player_id:
+                kind_label = f"{event.type} · {actor_label(event.player_id)}"
+            else:
+                kind_label = event.type
+            values = [fmt(event.global_video_time_ms), fmt(event.game_clock_ms), kind_label, team, event.note]
             for col, value in enumerate(values):
-                item = QTableWidgetItem(value); item.setData(Qt.UserRole, event.event_id); self.log.setItem(row, col, item)
+                item = QTableWidgetItem(value); item.setData(Qt.UserRole, event.event_id)
+                item.setToolTip(value)
+                self.log.setItem(row, col, item)
         observed = {team["id"]: 0 for team in self.project.teams}
         for event in sorted(self.project.events, key=lambda e: e.global_video_time_ms):
             if event.type in {"score_snapshot", "score_correction"}:
@@ -857,6 +1024,38 @@ class MainWindow(QMainWindow):
             elif event.points is not None and event.team_id in observed:
                 observed[event.team_id] += event.points
         self.score.setText("Recorded score: " + "  |  ".join(f"{t['name']} {observed[t['id']]}" for t in self.project.teams))
+        self._refresh_box_score()
+
+    def _refresh_box_score(self):
+        if not hasattr(self, "box_table"):
+            return
+        self.box_match_score.setText(self.score.text())
+        team_id = self._our_team_id()
+        team = next((item for item in self.project.teams if item["id"] == team_id), None)
+        if team is None:
+            self.box_table.setRowCount(0)
+            self.box_summary.setText("Choose Our squad and import its roster to see player statistics.")
+            return
+        rows, summary = basketball_box_score(self.project, team_id)
+        starters = sum(bool(row["starter"]) for row in rows)
+        self.box_summary.setText(
+            f"{team['name']} · {starters}/5 starters · {summary['team_only_points']} team-only points · "
+            f"{summary['legacy_substitutions']} old one-player substitutions need pairing. "
+            "Double-click their history rows to edit them."
+        )
+        self.box_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = [
+                "" if row["number"] is None else str(row["number"]), row["name"],
+                "Yes" if row["starter"] else "", str(row["points"]),
+                str(row["free_throws"]), str(row["twos"]), str(row["threes"]),
+                str(row["rebounds"] + row["rebounds_off"] + row["rebounds_def"]),
+                str(row["rebounds_off"]), str(row["rebounds_def"]),
+                str(row["assists"]), str(row["fouls"]), str(row["turnovers"]),
+                f"{row['subs_in']} / {row['subs_out']}",
+            ]
+            for column, value in enumerate(values):
+                self.box_table.setItem(row_index, column, QTableWidgetItem(value))
 
     def edit_event(self, row, _column):
         event_id = self.log.item(row, 0).data(Qt.UserRole)
@@ -869,7 +1068,24 @@ class MainWindow(QMainWindow):
         team.setCurrentIndex(max(0, team.findData(event.team_id))); form.addRow("Team", team)
         player = QComboBox(); player.addItem("—", None)
         for p in self.project.roster: player.addItem(p["name"], p["id"])
-        player.setCurrentIndex(max(0, player.findData(event.player_id))); form.addRow("Player", player)
+        player.setCurrentIndex(max(0, player.findData(event.player_id)))
+        pair_editor = event.type == "substitution" and event.team_id == self._our_team_id()
+        outgoing = incoming = None
+        if pair_editor:
+            outgoing, incoming = QComboBox(), QComboBox()
+            for picker in (outgoing, incoming):
+                picker.addItem("—", None)
+                for member in self.project.roster:
+                    if member.get("team_id") == event.team_id:
+                        number = member.get("number")
+                        label = f"#{number} {member['name']}" if number is not None else member["name"]
+                        picker.addItem(label, member["id"])
+            outgoing.setCurrentIndex(max(0, outgoing.findData(event.attributes.get("player_out_id", event.player_id))))
+            incoming.setCurrentIndex(max(0, incoming.findData(event.attributes.get("player_in_id"))))
+            form.addRow("Player leaving", outgoing)
+            form.addRow("Player entering", incoming)
+        else:
+            form.addRow("Player", player)
         related = QLineEdit(", ".join(event.related_event_ids)); form.addRow("Related IDs", related)
         related_pick = QComboBox(); related_pick.addItem("Select event to link", None)
         for other in sorted(self.project.events, key=lambda item: item.global_video_time_ms):
@@ -902,9 +1118,25 @@ class MainWindow(QMainWindow):
             ids = [s.strip() for s in related.text().split(",") if s.strip()]
             if any(i == event.event_id or not any(e.event_id == i for e in self.project.events) for i in ids):
                 raise ValueError("Related IDs must refer to other events")
+            updated = copy.deepcopy(event)
+            updated.note = note.text(); updated.team_id = team.currentData()
+            updated.player_id = player.currentData()
+            updated.related_event_ids = ids; updated.attributes = payload
+            if pair_editor:
+                out_id, in_id = outgoing.currentData(), incoming.currentData()
+                if in_id and not out_id:
+                    raise ValueError("Choose the player leaving as well as the player entering")
+                updated.player_id = out_id
+                updated.attributes.pop("player_out_id", None)
+                updated.attributes.pop("player_in_id", None)
+                if in_id:
+                    updated.attributes.update({"player_out_id": out_id, "player_in_id": in_id})
+            index = self.project.events.index(event)
+            candidate = copy.deepcopy(self.project)
+            candidate.events[index] = updated
+            candidate.validate()
             self._remember()
-            event.note = note.text(); event.team_id = team.currentData(); event.player_id = player.currentData()
-            event.related_event_ids = ids; event.attributes = payload; event.validate()
+            self.project.events[index] = updated
             self._changed(); self._refresh_log()
         except Exception as exc: self._error(str(exc))
 
@@ -990,7 +1222,7 @@ class MainWindow(QMainWindow):
                     "Right": lambda: self._skip(5000), "Ctrl+Z": self.undo, "Ctrl+Y": self.redo,
                     ".": self._frame, "Esc": self._cancel_tag}
         playback_keys = set(bindings)
-        for event in events_for_level(self.profile, self.project.level):
+        for event in self._available_events():
             key = self.project.shortcuts.get(event["type"], event.get("key"))
             if key and key not in bindings: bindings[key] = lambda kind=event["type"]: self.tag(kind)
         for sequence, action in bindings.items():
@@ -1002,7 +1234,7 @@ class MainWindow(QMainWindow):
                     shortcut.setEnabled(False)
 
     def edit_shortcuts(self):
-        labels = [f"{e['type']}: {self.project.shortcuts.get(e['type'], e.get('key', ''))}" for e in events_for_level(self.profile, self.project.level)]
+        labels = [f"{e['type']}: {self.project.shortcuts.get(e['type'], e.get('key', ''))}" for e in self._available_events()]
         item, ok = QInputDialog.getItem(self, "Shortcuts", "Choose action", labels, editable=False)
         if not ok: return
         kind = item.split(":", 1)[0]
@@ -1014,7 +1246,7 @@ class MainWindow(QMainWindow):
             reserved = {QKeySequence(key).toString() for key in ("Space", "Left", "Right", "Ctrl+Z", "Ctrl+Y", ".", "Esc", "Return", "Enter")}
             if normalized in reserved:
                 self._error("This shortcut is reserved for playback or undo/redo."); return
-            for event in events_for_level(self.profile, self.project.level):
+            for event in self._available_events():
                 if event["type"] == kind:
                     continue
                 other = self.project.shortcuts.get(event["type"], event.get("key"))
@@ -1096,9 +1328,23 @@ def main() -> int:
             pass
     application = QApplication(sys.argv)
     application.setWindowIcon(QIcon(str(ICON_PATH)))
-    chooser = StartDialog()
-    if chooser.exec() != QDialog.Accepted: return 0
-    window = MainWindow(chooser.project, chooser.path, chooser.profile_data)
+    if len(sys.argv) > 1:
+        path = Path(sys.argv[1])
+        try:
+            project = load_project(path)
+            profiles = available_profiles()
+            profile = project.profile_data or next((item for item in profiles
+                                                     if item["id"] == project.profile_id), None)
+            if profile is None:
+                raise ValueError("The project needs its matching sport profile")
+        except Exception as exc:
+            QMessageBox.warning(None, "Open failed", str(exc))
+            return 1
+    else:
+        chooser = StartDialog()
+        if chooser.exec() != QDialog.Accepted: return 0
+        project, path, profile = chooser.project, chooser.path, chooser.profile_data
+    window = MainWindow(project, path, profile)
     window.show()
     return application.exec()
 

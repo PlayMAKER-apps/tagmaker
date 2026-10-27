@@ -8,14 +8,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QIcon, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSlider,
     QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from playback.mpv_backend import MpvBackend, probe_duration
+from playback.mpv_backend import MpvBackend, configure_libmpv, probe_duration
 from playback.timeline import Timeline
 from storage.database import load_project, save_project
 from storage.interchange import export_csv, export_json, import_json, media_reference
@@ -377,6 +377,12 @@ class MainWindow(QMainWindow):
         self.pending_tag: Event | None = None
         self.pending_sub_out_id: str | None = None
         self.player: MpvBackend | None = None
+        saved_dll = QSettings("PlayMAKER", "TagMAKER").value("libmpv_dll", "")
+        if saved_dll and Path(saved_dll).is_file():
+            try:
+                configure_libmpv(saved_dll)
+            except (OSError, ValueError):
+                pass
         self._build_ui()
         self._refresh_all()
         self._bind_shortcuts()
@@ -402,6 +408,7 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         toolbar = QHBoxLayout()
         self._button(toolbar, "Add clips", self.add_clips)
+        self._button(toolbar, "Configure libmpv", self.choose_libmpv)
         self._button(toolbar, "Relink missing", self.relink)
         self._button(toolbar, "Add team", self.add_team)
         self._button(toolbar, "Export JSON", self.export_project)
@@ -529,8 +536,34 @@ class MainWindow(QMainWindow):
         if self.player: return
         try:
             self.player = MpvBackend(int(self.video.winId()), self.project.media, self.path.parent)
+        except RuntimeError as exc:
+            self.statusBar().showMessage(f"{exc} Choose Configure libmpv and select libmpv-2.dll.")
         except Exception as exc:
             self._error(str(exc))
+
+    def choose_libmpv(self):
+        file, _ = QFileDialog.getOpenFileName(
+            self, "Select your libmpv-2.dll", str(Path.home()),
+            "libmpv-2.dll (libmpv-2.dll);;DLL files (*.dll)")
+        if not file:
+            return
+        try:
+            configure_libmpv(file)
+            if self.player is None:
+                self._ensure_player()
+                if self.player is None:
+                    return
+                if self.project.media:
+                    try:
+                        previous = Timeline(self.project.media).from_global(self.project.last_global_video_time_ms)
+                        self.player.load(previous.clip_index, previous.source_time_ms, play=False)
+                    except ValueError:
+                        self.player.load(0, 0, play=False)
+                self._probe_missing()
+            QSettings("PlayMAKER", "TagMAKER").setValue("libmpv_dll", str(Path(file).resolve()))
+            self.statusBar().showMessage("libmpv configured. Reopen TagMAKER to switch an already loaded DLL.", 10000)
+        except Exception as exc:
+            self._error(f"Could not use libmpv: {exc}")
 
     def _error(self, message):
         QMessageBox.warning(self, "TagMAKER", message)
@@ -625,6 +658,8 @@ class MainWindow(QMainWindow):
             self.position = None
 
     def _probe_missing(self):
+        if self.player is None:
+            return
         if self.probe_future: return
         for media in self.project.media:
             if media.duration_ms is None and media.media_id not in self.probe_attempted:

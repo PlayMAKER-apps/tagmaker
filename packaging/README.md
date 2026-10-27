@@ -1,25 +1,20 @@
-# Private Windows packaging candidate
+# Windows packaging
 
-`build_windows.ps1` runs tests and makes a one-folder PyInstaller build in
-`dist/TagMAKER`. Pass the path to a local `libmpv-2.dll`. The script includes a
-visible `PRIVATE_TEST_BUILD.txt` marker; the bundled local test DLL has not
-passed the redistribution audit in `docs/licenses.md`. Do not publish this
-candidate.
-
-The Windows installer registers the `.tagmaker` project extension with a
-grayscale icon. Older `.tagmaker.sqlite3` and `.sqlite3` files continue to open
-from the app's **Open project** dialog; the installer does not change the
-system-wide `.sqlite3` association. The build script removes the foreign ICU
-DLL selected from Codex's Poppler tools so packaged Qt loads the Windows ICU.
+`build_windows.ps1` runs tests, builds the one-folder application, and checks
+the origin of every native binary selected by PyInstaller. The default build
+does not bundle libmpv. Users select a separately obtained `libmpv-2.dll`
+from **Configure libmpv** in the application and keep it at that path.
 
 ```powershell
-.\packaging\build_windows.ps1 -MpvDll .\.local-tools\mpv\libmpv-2.dll
+.\packaging\build_windows.ps1 -Iscc .\.local-tools\InnoSetup\ISCC.exe
 ```
 
-If an Inno Setup `ISCC.exe` compiler is available, add `-Iscc C:\path\to\ISCC.exe`
-to compile `TagMAKER.iss` into a private per-user installer. Test install,
-launch, playback of MP4/MTS, project reopen, and uninstall on a clean Windows
-account before a public release. The public package must remove the private
-marker, include complete third-party notices and source access, and use a DLL
-whose exact build has been audited. Code signing is also recommended for a
-downloadable installer.
+`-MpvDll C:\path\to\libmpv-2.dll` is retained for local testing only. Such a
+build is marked `PRIVATE TEST BUILD` and must not be uploaded: the local DLL's
+source and notices are incomplete. See the [distribution audit](../docs/licenses.md).
+
+The installer registers `.tagmaker` with a grayscale project icon and does
+not change the `.sqlite3` association. Before publishing an external-libmpv
+installer, review third-party notices and exact source links, test install,
+launch, project reopen, playback with a user-selected DLL, and uninstall on a
+clean Windows account. Code signing is recommended.

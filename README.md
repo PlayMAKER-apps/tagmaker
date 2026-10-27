@@ -1,6 +1,6 @@
 # TagMAKER 0.1 — Windows prototype guide
 
-TagMAKER is an offline desktop application for manually annotating recorded basketball and football matches. The project is stored in SQLite; video stays in separate files. Qt provides the interface and native libmpv decodes the video. This repository is still a **source prototype**, with no published installer or release.
+TagMAKER is an offline desktop application for manually annotating recorded basketball and football matches. The project is stored in SQLite; video stays in separate files. Qt provides the interface and native libmpv decodes the video. The alpha source is published; the Windows installer is being prepared for release.
 
 The screenshots below show the real application with synthetic teams, players, and footage.
 
@@ -8,7 +8,9 @@ The screenshots below show the real application with synthetic teams, players, a
 
 ### 1. Install and start
 
-Install Python 3.11 or newer and make a 64-bit `libmpv-2.dll` available on `PATH`. From the TagMAKER repository in **PowerShell**:
+For an installer build that does not bundle libmpv, install TagMAKER, obtain a compatible 64-bit `libmpv-2.dll` separately, then click **Configure libmpv** in TagMAKER and select that file. The choice is saved for later launches; the DLL stays at its original location. The [upstream Windows mpv builds](https://github.com/shinchiro/mpv-winbuild-cmake/releases) provide `mpv-dev-x86_64-*.7z` archives containing `libmpv-2.dll`; the [2026-10-21 x86-64 development archive](https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261021) was used for local testing. Review the selected build's own licensing and source information.
+
+For a source install, install Python 3.11 or newer. From the TagMAKER repository in **PowerShell**:
 
 ```powershell
 py -3 -m venv .venv
@@ -24,7 +26,7 @@ set "PATH=C:\path\to\libmpv;%PATH%"
 .\.venv\Scripts\tagmaker.exe
 ```
 
-Set `PATH` and launch TagMAKER in the same terminal. The developer's `.venv-uv` and `.local-tools` directories are local test tools and are not distributed. The future installer must choose and audit an exact libmpv/FFmpeg build before bundling it.
+Set `PATH` and launch TagMAKER in the same terminal, or launch without changing `PATH` and use **Configure libmpv**. The developer's `.venv-uv` and `.local-tools` directories are local test tools and are not distributed. The installer being prepared omits libmpv; any future self-contained installer must first audit its exact libmpv/FFmpeg build.
 
 ### 2. Create or reopen a match
 
@@ -94,6 +96,7 @@ JSON details are in [format 0.1](docs/format-0.1.md). The shared schema, validat
 
 - **`.MTS` is not shown:** update to this revision; the file picker now lists `.mts` and `.m2ts` in either case. **All files** also opens a file when libmpv recognizes its contents. A local 1080p `.MTS` was opened, sought, and played in the native backend.
 - **libmpv is not found:** check that Python and the DLL are both 64-bit and that the DLL directory is in the launching terminal's `PATH`.
+- **An installed TagMAKER has no video playback:** choose **Configure libmpv**, select the 64-bit `libmpv-2.dll` you obtained separately, and keep that file at the selected path. TagMAKER does not copy it into the installation.
 - **`$env:PATH` gives a syntax error:** the terminal is `cmd.exe`; use the `set "PATH=...;%PATH%"` form above.
 - **A player is missing:** check **Our squad** and **Convocati**; only called-up players of our squad appear in the actor buttons.
 - **An old substitution has one player:** double-click its history row and choose the player leaving and entering. Remove duplicate old tags for the same substitution.
@@ -105,7 +108,7 @@ JSON details are in [format 0.1](docs/format-0.1.md). The shared schema, validat
 
 The [verification record](docs/testing.md) covers automated tests, native playback smoke tests, and a sampled benchmark on a **71 min 43 s, 1920×1080, 21.05 GB MP4** plus a **17 min 21 s, 1920×1080 `.MTS`** from the same local recording set. The real-file check sampled startup, seeks, eight seconds of playback, and process RAM. It is not a sustained 90-minute run or a decoded-frame latency guarantee.
 
-The first tagged quarter is a useful early alpha usability test, but a full-match workflow and a clean Windows account still need hands-on checks. A standalone TagMAKER alpha can expose JSON export before VideoMAKER has an importer; that importer and its round-trip tests are suite integration milestones. Before distributing a binary alpha, audit the exact bundled libmpv/FFmpeg build and other third-party notices, then test MP4/MTS playback and project reopen on a clean Windows account. A **private, ignored installer candidate** has been installed, opened a project through its `.tagmaker` association, and uninstalled on this development account; see [verification](docs/testing.md) and [packaging](packaging/README.md). The [license review](docs/licenses.md) records what must be verified. No installer or portable package is published yet.
+The first tagged quarter is a useful early alpha usability test, but a full-match workflow and a clean Windows account still need hands-on checks. A standalone TagMAKER alpha can expose JSON export before VideoMAKER has an importer; that importer and its round-trip tests are suite integration milestones. The external-libmpv installer candidate still needs a complete third-party notice and source review, followed by MP4/MTS playback and project reopen on a clean Windows account. A **private, ignored installer candidate** has been installed, opened a project through its `.tagmaker` association, and uninstalled on this development account; see [verification](docs/testing.md) and [packaging](packaging/README.md). The [license review](docs/licenses.md) records the audit. No installer or portable package is published yet.
 
 A Rust rewrite is not planned for this MVP. Video decoding already runs in native libmpv and SQLite writes outside the UI thread. A port would need measured Python/Qt bottlenecks on representative matches to justify its cost.
 

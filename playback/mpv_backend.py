@@ -1,10 +1,30 @@
 """Small libmpv adapter. mpv decodes video; Python only reads timestamps."""
 from __future__ import annotations
+import os
 import time
 from pathlib import Path
 
 from playback.timeline import Position, Timeline
 from tagging.model import Media
+
+
+_dll_directory_handle = None
+
+
+def configure_libmpv(path: str | Path) -> None:
+    """Use a DLL supplied by the user without copying it into TagMAKER."""
+    global _dll_directory_handle
+    dll = Path(path).resolve()
+    if dll.name.casefold() != "libmpv-2.dll" or not dll.is_file():
+        raise ValueError("Choose an existing libmpv-2.dll file")
+    directory = str(dll.parent)
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    if not any(entry.casefold() == directory.casefold() for entry in entries):
+        os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
+    if hasattr(os, "add_dll_directory"):
+        if _dll_directory_handle is not None:
+            _dll_directory_handle.close()
+        _dll_directory_handle = os.add_dll_directory(directory)
 
 
 def _seconds(ms: int) -> str:
